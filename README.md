@@ -47,16 +47,21 @@ I had some issues with Python 3.12 and Numpy 2.x since I am using an old Intel-b
 
 ```
 context_prediction/
-├── download_memes.py          # Downloads meme images into the images/ folder
-├── train_patch_net.py         # Trains the PatchNet model on shuffled patches
-├── evaluator.py               # Evaluates the trained model on patch prediction
-├── where_waldo_game.py        # Streamlit game interface to guess patch positions
-├── model.py                   # PatchNet CNN architecture
-├── utils.py                   # Helper functions for image patching
-├── model.pth                  # Trained model weights (generated after training)
-├── images/                    # Folder containing training memes
-├── .gitignore                 # File exclusions for Git versioning
-└── README.md                  # Project overview and instructions
+├── app/
+│   ├── where_waldo_game.py     # Streamlit game app
+│   ├── model.py                # PatchNet model definition
+│   └── utils.py                # Patch slicing and utilities
+│
+├── scripts/
+│   ├── download_memes.py       # Downloads meme images
+│   ├── train_patch_net.py      # Training script
+│   └── evaluator.py            # Model evaluation script
+│
+├── images/                     # Downloaded meme images (gitignored)
+├── model.pth                   # Trained model weights (gitignored)
+├── requirements.txt            # Python dependency list
+├── .gitignore                  # Files/folders to exclude from Git
+└── README.md                   # Project overview and instructions
 ```
 
 ## How to Run the Project
