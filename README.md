@@ -35,8 +35,63 @@ I had some issues with Python 3.12 and Numpy 2.x since I am using an old Intel-b
 
 ---
 
-## How to Run It
+## Team Members
 
-### 1. Train the PatchNet
+- Hugo Arsenio – Training system implementation
+- Dan Angel – Utils and data pipeline
+- Niko – ?
+
+---
+
+## Project Structure
+
+```
+wheres_waldo/ ├── download_memes.py # Downloads meme images into the /images folder ├── train_patch_net.py # Trains the PatchNet model using meme patches ├── where_waldo_game.py # Streamlit web app to play the game ├── model.py # PatchNet model definition (small CNN) ├── utils.py # Patch slicing and utilities ├── model.pth # Trained model weights (created after training) ├── images/ # Folder for downloaded meme images ├── README.md # This file └── .gitignore
+```
+
+## How to Run the Project
+
+> All steps assume you're working in a Python 3.10+ environment with PyTorch 2.2+, NumPy 1.x, etc.
+
+---
+
+### Install Dependencies
+
+We recommend using a Conda environment:
+
+```bash
+conda create -n waldo_env python=3.10 -y
+conda activate waldo_env
+
+pip install torch==2.2.0 torchvision==0.17.0
+pip install numpy==1.26.4 pillow opencv-python streamlit requests
+```
+
+### Download Meme Images
+
+You can use your own images or find some cool ones to use. Just put the URLs in the ```download_memes.py``` file and it will download them all in the images folder for the model.
+
+```bash
+python download_memes.py
+```
+
+### Train the PatchNet Model
+
+Train a model to guess where an image patch comes from:
+
 ```bash
 python train_patch_net.py
+```
+
+After training, a ```model.pth``` file will be saved. This file is used by the game to make predictions.
+
+### Play the Game!
+
+Once trained, launch the Streamlit game:
+
+```bash
+streamlit run where_waldo_game.py
+```
+
+You’ll be shown a meme with one shuffled patch, and you’ll have to guess where it belongs.
+The AI will try to predict that too — who’s better, you or the model?
