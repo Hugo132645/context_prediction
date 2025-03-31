@@ -16,7 +16,7 @@ Built for an interactive presentation and laugh-powered machine learning.
 
 ## How It Works
 
-The idea comes from unsupervised context prediction (like [Doersch et al. 2015](https://arxiv.org/abs/1505.05192)), but applied to meme images for fun.
+The idea comes from unsupervised context prediction (like [Doersch et al. 2015]([https://arxiv.org/abs/1505.05192](https://ieeexplore.ieee.org/document/7410524))), but applied to meme images for fun.
 
 The model learns to identify the position of a patch (e.g., “is this top-left or bottom-right?”) by comparing it to other patches nearby.
 
@@ -46,7 +46,17 @@ I had some issues with Python 3.12 and Numpy 2.x since I am using an old Intel-b
 ## Project Structure
 
 ```
-wheres_waldo/ ├── download_memes.py # Downloads meme images into the /images folder ├── train_patch_net.py # Trains the PatchNet model using meme patches ├── where_waldo_game.py # Streamlit web app to play the game ├── model.py # PatchNet model definition (small CNN) ├── utils.py # Patch slicing and utilities ├── model.pth # Trained model weights (created after training) ├── images/ # Folder for downloaded meme images ├── README.md # This file └── .gitignore
+wheres_waldo/
+├── download_memes.py          # Downloads meme images into the images/ folder
+├── train_patch_net.py         # Trains the PatchNet model on shuffled patches
+├── evaluator.py               # Evaluates the trained model on patch prediction
+├── where_waldo_game.py        # Streamlit game interface to guess patch positions
+├── model.py                   # PatchNet CNN architecture
+├── utils.py                   # Helper functions for image patching
+├── model.pth                  # Trained model weights (generated after training)
+├── images/                    # Folder containing training memes
+├── .gitignore                 # File exclusions for Git versioning
+└── README.md                  # Project overview and instructions
 ```
 
 ## How to Run the Project
@@ -95,3 +105,11 @@ streamlit run where_waldo_game.py
 
 You’ll be shown a meme with one shuffled patch, and you’ll have to guess where it belongs.
 The AI will try to predict that too — who’s better, you or the model?
+
+### Notes
+
+The model is CPU-friendly and trains in a few minutes on small datasets.
+
+You can replace the meme images in ```images/``` with your own for custom training and gameplay.
+
+The game UI is built with Streamlit and is designed to be presentation-ready for demo purposes.
