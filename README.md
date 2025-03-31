@@ -39,7 +39,7 @@ I had some issues with Python 3.12 and Numpy 2.x since I am using an old Intel-b
 
 - Hugo Arsenio – Training system implementation
 - Dan Angel – Utils and data pipeline
-- Niko – ?
+- Niko – Evaluation of the model
 
 ---
 
