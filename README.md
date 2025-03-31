@@ -73,8 +73,7 @@ We recommend using a Conda environment:
 conda create -n waldo_env python=3.10 -y
 conda activate waldo_env
 
-pip install torch==2.2.0 torchvision==0.17.0
-pip install numpy==1.26.4 pillow opencv-python streamlit requests
+pip install -r requirements.txt
 ```
 
 ### Download Meme Images
