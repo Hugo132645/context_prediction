@@ -46,7 +46,7 @@ I had some issues with Python 3.12 and Numpy 2.x since I am using an old Intel-b
 ## Project Structure
 
 ```
-wheres_waldo/
+context_prediction/
 ├── download_memes.py          # Downloads meme images into the images/ folder
 ├── train_patch_net.py         # Trains the PatchNet model on shuffled patches
 ├── evaluator.py               # Evaluates the trained model on patch prediction
