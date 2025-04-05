@@ -2,49 +2,74 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import transforms
-from app.model import PatchNet
+from torch.utils.data import Dataset, DataLoader
+from app.model import PatchPositionNet
 from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, seed_everything
 
-# Set seed and config
+# Set up config and seed
+config = PatchConfig(
+    patch_size=64,
+    gap=32,
+    jitter=5,
+    max_image_size=(300, 300),
+    color_drop=True
+)
 seed_everything(42)
-config = PatchConfig()
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load images
-images = load_images_from_folder("images", config)
+# Dataset Class
+class PatchPairDataset(Dataset):
+    def __init__(self, image_folder, config, num_pairs=10000):
+        self.config = config
+        self.images = load_images_from_folder(image_folder, config)
+        self.num_pairs = num_pairs
+        if not self.images:
+            raise RuntimeError(f"No valid images found in {image_folder}")
 
-# Define model
-model = PatchNet().to(device)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    def __len__(self):
+        return self.num_pairs
 
-# Training loop
-for epoch in range(5):
-    total_loss = 0
-    for _ in range(100):  # number of iterations
-        # Pick random image and patch pair
-        _, img = images[torch.randint(len(images), (1,)).item()]
-        try:
-            p1, p2, label = extract_random_patch_pair(img, config)
-        except ValueError:
-            continue  # skip too-small images
+    def __getitem__(self, idx):
+        for _ in range(10):  # retry up to 10 times
+            try:
+                _, img = self.images[torch.randint(len(self.images), (1,)).item()]
+                p1, p2, direction = extract_random_patch_pair(img, self.config)
+                input_tensor = preprocess_patch_pair(p1, p2).squeeze(0)
+                return input_tensor, direction
+            except ValueError:
+                continue
+        raise RuntimeError("Failed to extract a valid patch pair after 10 attempts.")
 
-        input_tensor = preprocess_patch_pair(p1, p2).to(device)
-        label_tensor = torch.tensor([label], dtype=torch.long).to(device)
+# Training Function
+def train():
+    dataset = PatchPairDataset("images", config, num_pairs=5000)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 
-        # Forward pass
-        output = model(input_tensor)
-        loss = criterion(output, label_tensor)
+    model = PatchPositionNet()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.CrossEntropyLoss()
 
-        total_loss += loss.item()
+    for epoch in range(5):
+        total_loss = 0.0
+        for batch_x, batch_y in dataloader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
 
-    print(f"Epoch {epoch + 1} Loss: {total_loss:.4f}")
+            pred = model(batch_x)
+            loss = criterion(pred, batch_y)
 
-# Save model
-torch.save(model.state_dict(), "model.pth")
-print("Model saved to model.pth")
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch + 1} Loss: {avg_loss:.4f}")
+
+    torch.save(model.state_dict(), "model.pth")
+    print("Model saved to model.pth")
+
+if __name__ == "__main__":
+    train()
