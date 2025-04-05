@@ -1,63 +1,91 @@
 import streamlit as st
-import cv2
-import numpy as np
 import torch
-from app.model import PatchNet
-from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, DIRECTION_MAP
+import numpy as np
+import cv2
+from app.model import PatchPositionNet
+from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, DIRECTION_MAP
 
-# Setup
-st.title("Where's Waldo: Patch Prediction Game")
+# Config and model
 config = PatchConfig()
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load model
-model = PatchNet().to(device)
+model = PatchPositionNet().to(device)
 model.load_state_dict(torch.load("model.pth", map_location=device))
 model.eval()
 
-# Load image
+# Load resized images
 images = load_images_from_folder("images", config)
-filename, img = images[np.random.randint(len(images))]
+direction_names = [
+    "Top-Left", "Top", "Top-Right",
+    "Left",           "Right",
+    "Bottom-Left", "Bottom", "Bottom-Right"
+]
 
-# Extract patch pair
-patch1, patch2, label = extract_random_patch_pair(img, config)
+# UI
+st.title("Where's Waldo - Patch Direction Game")
+
+# Select a random image
+idx = np.random.randint(len(images))
+filename, img = images[idx]
+
+# Extract patches
+try:
+    p1, p2, label = extract_random_patch_pair(img, config)
+except ValueError:
+    st.error("Image is too small for patch extraction.")
+    st.stop()
 
 # Preprocess
-input_tensor = torch.cat([torch.tensor(patch1).permute(2,0,1)/255.0,
-                          torch.tensor(patch2).permute(2,0,1)/255.0], dim=0).unsqueeze(0).float()
-output = model(input_tensor)
-predicted_direction = torch.argmax(output).item()
+input_tensor = preprocess_patch_pair(p1, p2).to(device)
 
-# Show patch
-st.image(cv2.cvtColor(patch2, cv2.COLOR_BGR2RGB), caption="Mystery Patch", width=200)
+# Prediction
+with torch.no_grad():
+    logits = model(input_tensor)
+    pred = torch.argmax(logits, dim=1).item()
 
-# Let user guess
-guess = st.radio("Where is this patch from?", list(DIRECTION_MAP.keys()))
+# Display patches side by side
+combined = np.hstack([
+    cv2.copyMakeBorder(p1, 2, 2, 2, 2, cv2.BORDER_CONSTANT, value=(255, 0, 0)),  # Blue border
+    cv2.copyMakeBorder(p2, 2, 2, 2, 2, cv2.BORDER_CONSTANT, value=(0, 0, 255))   # Red border
+])
+st.image(combined, caption=f"Image: {filename}", channels="BGR", width=256)
 
-# Button to submit guess
-if st.button("Submit Guess"):
-    if guess == label:
-        st.success("Correct!")
+# Show buttons
+st.subheader("Guess the relative direction of the second patch (red) from the first (blue):")
+
+col1, col2, col3 = st.columns(3)
+guessed = st.session_state.get("guessed", False)
+correct = st.session_state.get("correct", None)
+
+def guess(direction_idx):
+    st.session_state.guessed = True
+    st.session_state.correct = (direction_idx == label)
+
+with col1:
+    if st.button("Top-Left"): guess(0)
+    if st.button("Left"): guess(3)
+    if st.button("Bottom-Left"): guess(5)
+
+with col2:
+    if st.button("Top"): guess(1)
+    st.write(" ")  # Spacer
+    if st.button("Bottom"): guess(6)
+
+with col3:
+    if st.button("Top-Right"): guess(2)
+    if st.button("Right"): guess(4)
+    if st.button("Bottom-Right"): guess(7)
+
+# Feedback
+if st.session_state.get("guessed", False):
+    st.markdown("---")
+    if st.session_state["correct"]:
+        st.success("✅ Correct!")
     else:
-        st.error(f"Incorrect. Correct answer: {label}")
+        correct_dir = direction_names[label]
+        predicted_dir = direction_names[pred]
+        st.error(f"❌ Wrong. Correct: **{correct_dir}** — Model predicted: **{predicted_dir}**")
 
-    if guess == predicted_direction:
-        st.info("Model agrees with you!")
-    else:
-        st.warning(f"Model guessed: {predicted_direction}")
-
-# Show full image with outline
-def draw_outline(img, center, color):
-    x, y = center
-    return cv2.rectangle(img.copy(), (x, y), (x + config.patch_size, y + config.patch_size), color, 2)
-
-# Compute true location
-margin = config.patch_size + config.gap
-center_x = img.shape[1] // 2
-center_y = img.shape[0] // 2
-dx, dy = DIRECTION_MAP[label]
-tx = center_x + dx * (config.patch_size + config.gap)
-ty = center_y + dy * (config.patch_size + config.gap)
-
-outlined = draw_outline(img, (tx, ty), (255, 0, 0))  # Red for true patch
-st.image(cv2.cvtColor(outlined, cv2.COLOR_BGR2RGB), caption="Meme with Correct Patch Location")
+    if st.button("Play Again"):
+        st.session_state.guessed = False
+        st.experimental_rerun()
