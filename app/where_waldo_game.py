@@ -1,79 +1,63 @@
 import streamlit as st
-import torch
-import numpy as np
-import random
 import cv2
-from PIL import Image
-from model import PatchPositionNet
-from utils import load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair
+import numpy as np
+import torch
+from app.model import PatchNet
+from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, DIRECTION_MAP
 
-# --- Setup ---
-st.set_page_config(page_title="Where's the Patch?", layout="centered")
-st.title("Where's the Patch?")
-st.caption("Can you outsmart a neural net? Guess where the red patch came from!")
+# Setup
+st.title("Where's Waldo: Patch Prediction Game")
+config = PatchConfig()
+device = torch.device("cpu")
 
-DIRECTIONS = [
-    "Top-Left", "Top", "Top-Right",
-    "Left",         "Right",
-    "Bottom-Left", "Bottom", "Bottom-Right"
-]
-
-# --- Load model ---
-model = PatchPositionNet()
-model.load_state_dict(torch.load("model.pth", map_location="cpu"))
+# Load model
+model = PatchNet().to(device)
+model.load_state_dict(torch.load("model.pth", map_location=device))
 model.eval()
 
-# --- Load images ---
-images = load_images_from_folder("images")
-filename, image = random.choice(images)
+# Load image
+images = load_images_from_folder("images", config)
+filename, img = images[np.random.randint(len(images))]
 
-# --- Get patch pair and options ---
-patch1, patch2, correct_dir = extract_random_patch_pair(image)
-patch_pairs = []
-for i in range(8):
-    # generate all possible second patches
-    fake_patch1, fake_patch2, _ = extract_random_patch_pair(image)
-    patch_pairs.append((patch1, fake_patch2))
-patch_pairs[correct_dir] = (patch1, patch2)
+# Extract patch pair
+patch1, patch2, label = extract_random_patch_pair(img, config)
 
-# --- Show anchor patch (blue) ---
-st.subheader("🔵 Reference Patch")
-st.image(patch1, width=128)
+# Preprocess
+input_tensor = torch.cat([torch.tensor(patch1).permute(2,0,1)/255.0,
+                          torch.tensor(patch2).permute(2,0,1)/255.0], dim=0).unsqueeze(0).float()
+output = model(input_tensor)
+predicted_direction = torch.argmax(output).item()
 
-# --- Show 8 candidate patches as buttons ---
-st.subheader("🔴 Where's the red patch?")
-cols = st.columns(4)
-user_guess = None
+# Show patch
+st.image(cv2.cvtColor(patch2, cv2.COLOR_BGR2RGB), caption="Mystery Patch", width=200)
 
-for i in range(8):
-    with cols[i % 4]:
-        if st.button(DIRECTIONS[i]):
-            user_guess = i
+# Let user guess
+guess = st.radio("Where is this patch from?", list(DIRECTION_MAP.keys()))
 
-# --- Run model prediction ---
-guesses = []
-for p1, p2 in patch_pairs:
-    input_tensor = preprocess_patch_pair(p1, p2)
-    with torch.no_grad():
-        output = model(input_tensor)
-    prob = torch.softmax(output, dim=1)
-    guesses.append(prob[0, i].item())
-
-model_prediction = torch.argmax(torch.tensor(guesses)).item()
-
-# --- Show results ---
-if user_guess is not None:
-    st.markdown("### Results")
-    st.write(f" **Correct answer:** {DIRECTIONS[correct_dir]}")
-    st.write(f" **Model guessed:** {DIRECTIONS[model_prediction]}")
-    st.write(f" **You guessed:** {DIRECTIONS[user_guess]}")
-    
-    if user_guess == correct_dir:
-        st.success("You nailed it!")
+# Button to submit guess
+if st.button("Submit Guess"):
+    if guess == label:
+        st.success("Correct!")
     else:
-        st.warning("Not quite! But hey, even the model might be wrong")
+        st.error(f"Incorrect. Correct answer: {label}")
 
-    if model_prediction == correct_dir:
-        st.info("The model got it right too!")
+    if guess == predicted_direction:
+        st.info("Model agrees with you!")
     else:
-        st.info("The model was confused too. Great minds think alike?")
+        st.warning(f"Model guessed: {predicted_direction}")
+
+# Show full image with outline
+def draw_outline(img, center, color):
+    x, y = center
+    return cv2.rectangle(img.copy(), (x, y), (x + config.patch_size, y + config.patch_size), color, 2)
+
+# Compute true location
+margin = config.patch_size + config.gap
+center_x = img.shape[1] // 2
+center_y = img.shape[0] // 2
+dx, dy = DIRECTION_MAP[label]
+tx = center_x + dx * (config.patch_size + config.gap)
+ty = center_y + dy * (config.patch_size + config.gap)
+
+outlined = draw_outline(img, (tx, ty), (255, 0, 0))  # Red for true patch
+st.image(cv2.cvtColor(outlined, cv2.COLOR_BGR2RGB), caption="Meme with Correct Patch Location")
