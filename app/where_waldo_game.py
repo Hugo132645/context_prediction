@@ -1,79 +1,91 @@
 import streamlit as st
 import torch
 import numpy as np
-import random
 import cv2
-from PIL import Image
-from model import PatchPositionNet
-from utils import load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair
+from app.model import PatchPositionNet
+from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, DIRECTION_MAP
 
-# --- Setup ---
-st.set_page_config(page_title="Where's the Patch?", layout="centered")
-st.title("Where's the Patch?")
-st.caption("Can you outsmart a neural net? Guess where the red patch came from!")
+# Config and model
+config = PatchConfig()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-DIRECTIONS = [
+model = PatchPositionNet().to(device)
+model.load_state_dict(torch.load("model.pth", map_location=device))
+model.eval()
+
+# Load resized images
+images = load_images_from_folder("images", config)
+direction_names = [
     "Top-Left", "Top", "Top-Right",
-    "Left",         "Right",
+    "Left",           "Right",
     "Bottom-Left", "Bottom", "Bottom-Right"
 ]
 
-# --- Load model ---
-model = PatchPositionNet()
-model.load_state_dict(torch.load("model.pth", map_location="cpu"))
-model.eval()
+# UI
+st.title("Where's Waldo - Patch Direction Game")
 
-# --- Load images ---
-images = load_images_from_folder("images")
-filename, image = random.choice(images)
+# Select a random image
+idx = np.random.randint(len(images))
+filename, img = images[idx]
 
-# --- Get patch pair and options ---
-patch1, patch2, correct_dir = extract_random_patch_pair(image)
-patch_pairs = []
-for i in range(8):
-    # generate all possible second patches
-    fake_patch1, fake_patch2, _ = extract_random_patch_pair(image)
-    patch_pairs.append((patch1, fake_patch2))
-patch_pairs[correct_dir] = (patch1, patch2)
+# Extract patches
+try:
+    p1, p2, label = extract_random_patch_pair(img, config)
+except ValueError:
+    st.error("Image is too small for patch extraction.")
+    st.stop()
 
-# --- Show anchor patch (blue) ---
-st.subheader("🔵 Reference Patch")
-st.image(patch1, width=128)
+# Preprocess
+input_tensor = preprocess_patch_pair(p1, p2).to(device)
 
-# --- Show 8 candidate patches as buttons ---
-st.subheader("🔴 Where's the red patch?")
-cols = st.columns(4)
-user_guess = None
+# Prediction
+with torch.no_grad():
+    logits = model(input_tensor)
+    pred = torch.argmax(logits, dim=1).item()
 
-for i in range(8):
-    with cols[i % 4]:
-        if st.button(DIRECTIONS[i]):
-            user_guess = i
+# Display patches side by side
+combined = np.hstack([
+    cv2.copyMakeBorder(p1, 2, 2, 2, 2, cv2.BORDER_CONSTANT, value=(255, 0, 0)),  # Blue border
+    cv2.copyMakeBorder(p2, 2, 2, 2, 2, cv2.BORDER_CONSTANT, value=(0, 0, 255))   # Red border
+])
+st.image(combined, caption=f"Image: {filename}", channels="BGR", width=256)
 
-# --- Run model prediction ---
-guesses = []
-for p1, p2 in patch_pairs:
-    input_tensor = preprocess_patch_pair(p1, p2)
-    with torch.no_grad():
-        output = model(input_tensor)
-    prob = torch.softmax(output, dim=1)
-    guesses.append(prob[0, i].item())
+# Show buttons
+st.subheader("Guess the relative direction of the second patch (red) from the first (blue):")
 
-model_prediction = torch.argmax(torch.tensor(guesses)).item()
+col1, col2, col3 = st.columns(3)
+guessed = st.session_state.get("guessed", False)
+correct = st.session_state.get("correct", None)
 
-# --- Show results ---
-if user_guess is not None:
-    st.markdown("### Results")
-    st.write(f" **Correct answer:** {DIRECTIONS[correct_dir]}")
-    st.write(f" **Model guessed:** {DIRECTIONS[model_prediction]}")
-    st.write(f" **You guessed:** {DIRECTIONS[user_guess]}")
-    
-    if user_guess == correct_dir:
-        st.success("You nailed it!")
+def guess(direction_idx):
+    st.session_state.guessed = True
+    st.session_state.correct = (direction_idx == label)
+
+with col1:
+    if st.button("Top-Left"): guess(0)
+    if st.button("Left"): guess(3)
+    if st.button("Bottom-Left"): guess(5)
+
+with col2:
+    if st.button("Top"): guess(1)
+    st.write(" ")  # Spacer
+    if st.button("Bottom"): guess(6)
+
+with col3:
+    if st.button("Top-Right"): guess(2)
+    if st.button("Right"): guess(4)
+    if st.button("Bottom-Right"): guess(7)
+
+# Feedback
+if st.session_state.get("guessed", False):
+    st.markdown("---")
+    if st.session_state["correct"]:
+        st.success("✅ Correct!")
     else:
-        st.warning("Not quite! But hey, even the model might be wrong")
+        correct_dir = direction_names[label]
+        predicted_dir = direction_names[pred]
+        st.error(f"❌ Wrong. Correct: **{correct_dir}** — Model predicted: **{predicted_dir}**")
 
-    if model_prediction == correct_dir:
-        st.info("The model got it right too!")
-    else:
-        st.info("The model was confused too. Great minds think alike?")
+    if st.button("Play Again"):
+        st.session_state.guessed = False
+        st.experimental_rerun()

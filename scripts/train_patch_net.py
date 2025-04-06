@@ -3,65 +3,70 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import cv2
-import numpy as np
-from utils import DIRECTION_MAP, PATCH_SIZE, GAP
-from model import PatchPositionNet
+from app.model import PatchPositionNet
+from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, seed_everything
 
-class PatchDataset(Dataset):
-    def __init__(self, img_dir, num_pairs=10000):
-        self.img_paths = [os.path.join(img_dir, f) for f in os.listdir(img_dir)]
+# Set up config and seed
+config = PatchConfig(
+    patch_size=64,
+    gap=32,
+    jitter=5,
+    max_image_size=(300, 300),
+    color_drop=True
+)
+seed_everything(42)
+
+# Dataset Class
+class PatchPairDataset(Dataset):
+    def __init__(self, image_folder, config, num_pairs=10000):
+        self.config = config
+        self.images = load_images_from_folder(image_folder, config)
         self.num_pairs = num_pairs
+        if not self.images:
+            raise RuntimeError(f"No valid images found in {image_folder}")
 
     def __len__(self):
         return self.num_pairs
 
     def __getitem__(self, idx):
-        img_path = np.random.choice(self.img_paths)
-        img = cv2.imread(img_path)
-        img = cv2.resize(img, (300, 300))
+        for _ in range(10):  # retry up to 10 times
+            try:
+                _, img = self.images[torch.randint(len(self.images), (1,)).item()]
+                p1, p2, direction = extract_random_patch_pair(img, self.config)
+                input_tensor = preprocess_patch_pair(p1, p2).squeeze(0)
+                return input_tensor, direction
+            except ValueError:
+                continue
+        raise RuntimeError("Failed to extract a valid patch pair after 10 attempts.")
 
-        h, w, _ = img.shape
-        margin = PATCH_SIZE + GAP
-        x = np.random.randint(margin, w - margin)
-        y = np.random.randint(margin, h - margin)
-        direction = np.random.randint(8)
-        dy, dx = DIRECTION_MAP[direction]
-
-        patch1 = img[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
-        x2 = x + dx * (PATCH_SIZE + GAP)
-        y2 = y + dy * (PATCH_SIZE + GAP)
-        patch2 = img[y2:y2+PATCH_SIZE, x2:x2+PATCH_SIZE]
-
-        if patch1.shape != (PATCH_SIZE, PATCH_SIZE, 3) or patch2.shape != (PATCH_SIZE, PATCH_SIZE, 3):
-            return self.__getitem__(idx)  #skip broken samples
-
-        p1 = torch.from_numpy(patch1.transpose(2, 0, 1)).float() / 255.0
-        p2 = torch.from_numpy(patch2.transpose(2, 0, 1)).float() / 255.0
-        pair = torch.cat([p1, p2], dim=0)
-        return pair, direction
-
+# Training Function
 def train():
+    dataset = PatchPairDataset("images", config, num_pairs=5000)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
+
     model = PatchPositionNet()
-    dataset = PatchDataset("images", num_pairs=10000)
-    loader = DataLoader(dataset, batch_size=64, shuffle=True)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.CrossEntropyLoss()
+    model.to(device)
 
-    for epoch in range(10):
-        total_loss = 0
-        for x, y in loader:
-            x, y = x.to(device), y.to(device)
-            pred = model(x)
-            loss = loss_fn(pred, y)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(5):
+        total_loss = 0.0
+        for batch_x, batch_y in dataloader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+
+            pred = model(batch_x)
+            loss = criterion(pred, batch_y)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             total_loss += loss.item()
-        print(f"Epoch {epoch+1}, Loss: {total_loss / len(loader):.4f}")
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch + 1} Loss: {avg_loss:.4f}")
 
     torch.save(model.state_dict(), "model.pth")
     print("Model saved to model.pth")
