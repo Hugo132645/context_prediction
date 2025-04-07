@@ -5,12 +5,13 @@ import torch
 from torchvision import transforms
 from dataclasses import dataclass
 from typing import Tuple, List
+import math
 
 @dataclass
 class PatchConfig:
-    patch_size: int = 28
-    gap: int = 8
-    jitter: int = 2
+    patch_size: int = 32
+    gap: int = 16
+    jitter: int = 4
     max_image_size: Tuple[int, int] = (128, 128)
     color_drop: bool = True
 
@@ -45,42 +46,60 @@ def extract_random_patch_pair(img: np.ndarray, config: PatchConfig, apply_color_
     h, w, _ = img.shape
     margin = config.patch_size + config.gap + config.jitter
 
-    for _ in range(10):  # try 10 times to find a valid patch
+    # Label → (dy, dx)
+    DIRECTION_MAP = {
+        0: ( 0,  1),  # Right
+        1: (-1,  1),  # Top-Right
+        2: (-1,  0),  # Top
+        3: (-1, -1),  # Top-Left
+        4: ( 0, -1),  # Left
+        5: ( 1, -1),  # Bottom-Left
+        6: ( 1,  0),  # Bottom
+        7: ( 1,  1)   # Bottom-Right
+    }
+
+    shift = config.patch_size + config.gap
+
+    for _ in range(20):  # try up to 20 times
         if h <= 2 * margin or w <= 2 * margin:
             raise ValueError("Image is too small to extract patches with the given config.")
 
-        x = np.random.randint(margin, w - margin)
-        y = np.random.randint(margin, h - margin)
+        # Random anchor patch1
+        x1 = np.random.randint(margin, w - margin)
+        y1 = np.random.randint(margin, h - margin)
 
         dx_jit, dy_jit = np.random.randint(-config.jitter, config.jitter + 1, size=2)
-        x += dx_jit
-        y += dy_jit
+        x1 += dx_jit
+        y1 += dy_jit
 
-        direction = np.random.randint(8)
-        dy, dx = DIRECTION_MAP[direction]
+        # Filter valid directions
+        valid_directions = []
+        for label, (dy, dx) in DIRECTION_MAP.items():
+            x2 = x1 + dx * shift
+            y2 = y1 + dy * shift
+            if (0 <= x2 < w - config.patch_size and 0 <= y2 < h - config.patch_size):
+                valid_directions.append((label, x2, y2))
 
-        x2 = x + dx * (config.patch_size + config.gap)
-        y2 = y + dy * (config.patch_size + config.gap)
+        if not valid_directions:
+            continue  # try a new p1
 
-        if (0 <= x < w - config.patch_size and
-            0 <= y < h - config.patch_size and
-            0 <= x2 < w - config.patch_size and
-            0 <= y2 < h - config.patch_size):
+        # Randomly pick a valid direction
+        direction, x2, y2 = valid_directions[np.random.randint(len(valid_directions))]
 
-            patch1 = img[y:y+config.patch_size, x:x+config.patch_size]
-            patch2 = img[y2:y2+config.patch_size, x2:x2+config.patch_size]
+        patch1 = img[y1:y1 + config.patch_size, x1:x1 + config.patch_size]
+        patch2 = img[y2:y2 + config.patch_size, x2:x2 + config.patch_size]
 
-            if patch1.shape != (config.patch_size, config.patch_size, 3) or \
-               patch2.shape != (config.patch_size, config.patch_size, 3):
-                continue
+        if patch1.shape != (config.patch_size, config.patch_size, 3) or \
+           patch2.shape != (config.patch_size, config.patch_size, 3):
+            continue
 
-            if apply_color_drop and config.color_drop:
-                patch1 = apply_color_dropping(patch1)
-                patch2 = apply_color_dropping(patch2)
+        if apply_color_drop and config.color_drop:
+            patch1 = apply_color_dropping(patch1)
+            patch2 = apply_color_dropping(patch2)
 
-            return patch1, patch2, direction
+        return patch1, patch2, direction
 
-    raise ValueError("Failed to extract a valid patch pair after 10 attempts.")
+    raise ValueError("Failed to extract a valid patch pair after 20 attempts.")
 
 def preprocess_patch_pair(p1: np.ndarray, p2: np.ndarray) -> torch.Tensor:
     t1 = transform(p1)
