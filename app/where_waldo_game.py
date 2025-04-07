@@ -2,11 +2,11 @@ import streamlit as st
 import torch
 import numpy as np
 import cv2
-from app.model import PatchPositionNet
-from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, DIRECTION_MAP
+from model import PatchPositionNet
+from utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, DIRECTION_MAP
 
-# Config and model
-config = PatchConfig()
+# Config with smaller patch and gap to work with small images
+config = PatchConfig(patch_size=28, gap=8, jitter=2)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = PatchPositionNet().to(device)
@@ -27,10 +27,11 @@ st.title("Where's Waldo - Patch Direction Game")
 # Select a random image
 idx = np.random.randint(len(images))
 filename, img = images[idx]
+st.write(f"Selected image: {filename}, shape: {img.shape}")
 
 # Extract patches
 try:
-    p1, p2, label = extract_random_patch_pair(img, config)
+    p1, p2, label = extract_random_patch_pair(img, config, apply_color_drop=False)
 except ValueError:
     st.error("Image is too small for patch extraction.")
     st.stop()
@@ -88,4 +89,4 @@ if st.session_state.get("guessed", False):
 
     if st.button("Play Again"):
         st.session_state.guessed = False
-        st.experimental_rerun()
+        st.rerun()
