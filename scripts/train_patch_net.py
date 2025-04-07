@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from app.model import PatchPositionNet
-from app.utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, seed_everything
+from model import PatchPositionNet
+from utils import PatchConfig, load_images_from_folder, extract_random_patch_pair, preprocess_patch_pair, seed_everything
 
 # Set up config and seed
 config = PatchConfig(
