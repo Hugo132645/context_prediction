@@ -8,9 +8,9 @@ from typing import Tuple, List
 
 @dataclass
 class PatchConfig:
-    patch_size: int = 32
-    gap: int = 16
-    jitter: int = 4
+    patch_size: int = 28
+    gap: int = 8
+    jitter: int = 2
     max_image_size: Tuple[int, int] = (128, 128)
     color_drop: bool = True
 
@@ -41,39 +41,46 @@ def apply_color_dropping(patch: np.ndarray) -> np.ndarray:
             dropped[:, :, c] = noise[:, :, c]
     return dropped
 
-def extract_random_patch_pair(img: np.ndarray, config: PatchConfig) -> Tuple[np.ndarray, np.ndarray, int]:
+def extract_random_patch_pair(img: np.ndarray, config: PatchConfig, apply_color_drop: bool = True) -> Tuple[np.ndarray, np.ndarray, int]:
     h, w, _ = img.shape
     margin = config.patch_size + config.gap + config.jitter
 
-    if h <= 2 * margin or w <= 2 * margin:
-        raise ValueError("Image is too small to extract patches with the given config.")
+    for _ in range(10):  # try 10 times to find a valid patch
+        if h <= 2 * margin or w <= 2 * margin:
+            raise ValueError("Image is too small to extract patches with the given config.")
 
-    x = np.random.randint(margin, w - margin)
-    y = np.random.randint(margin, h - margin)
+        x = np.random.randint(margin, w - margin)
+        y = np.random.randint(margin, h - margin)
 
-    dx_jit, dy_jit = np.random.randint(-config.jitter, config.jitter + 1, size=2)
-    x += dx_jit
-    y += dy_jit
+        dx_jit, dy_jit = np.random.randint(-config.jitter, config.jitter + 1, size=2)
+        x += dx_jit
+        y += dy_jit
 
-    direction = np.random.randint(8)
-    dy, dx = DIRECTION_MAP[direction]
+        direction = np.random.randint(8)
+        dy, dx = DIRECTION_MAP[direction]
 
-    x2 = x + dx * (config.patch_size + config.gap)
-    y2 = y + dy * (config.patch_size + config.gap)
+        x2 = x + dx * (config.patch_size + config.gap)
+        y2 = y + dy * (config.patch_size + config.gap)
 
-    patch1 = img[y:y+config.patch_size, x:x+config.patch_size]
-    patch2 = img[y2:y2+config.patch_size, x2:x2+config.patch_size]
+        if (0 <= x < w - config.patch_size and
+            0 <= y < h - config.patch_size and
+            0 <= x2 < w - config.patch_size and
+            0 <= y2 < h - config.patch_size):
 
-    # Ensure shapes are correct
-    if patch1.shape != (config.patch_size, config.patch_size, 3) or \
-       patch2.shape != (config.patch_size, config.patch_size, 3):
-        raise ValueError("Extracted patches have incorrect shape.")
+            patch1 = img[y:y+config.patch_size, x:x+config.patch_size]
+            patch2 = img[y2:y2+config.patch_size, x2:x2+config.patch_size]
 
-    if config.color_drop:
-        patch1 = apply_color_dropping(patch1)
-        patch2 = apply_color_dropping(patch2)
+            if patch1.shape != (config.patch_size, config.patch_size, 3) or \
+               patch2.shape != (config.patch_size, config.patch_size, 3):
+                continue
 
-    return patch1, patch2, direction
+            if apply_color_drop and config.color_drop:
+                patch1 = apply_color_dropping(patch1)
+                patch2 = apply_color_dropping(patch2)
+
+            return patch1, patch2, direction
+
+    raise ValueError("Failed to extract a valid patch pair after 10 attempts.")
 
 def preprocess_patch_pair(p1: np.ndarray, p2: np.ndarray) -> torch.Tensor:
     t1 = transform(p1)
